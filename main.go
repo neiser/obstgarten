@@ -92,7 +92,7 @@ func (s Optimierer) MachZug(obstgarten *Obstgarten) {
 		}
 		Durcheinander(paare)
 		slices.SortStableFunc(paare, func(a, b Paar) int {
-			return a.Anzahl - b.Anzahl
+			return b.Anzahl - a.Anzahl
 		})
 		MachObstkorbZug(paare, func(paar Paar) bool {
 			return paar.Frucht.Nehme()
