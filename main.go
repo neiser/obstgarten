@@ -1,10 +1,12 @@
 package main
 
 import (
+	"fmt"
 	"iter"
-	"log"
+	"math"
 	"math/rand"
 	"slices"
+	"sync"
 )
 
 type WürfelErgebnis int
@@ -22,21 +24,12 @@ func WerfeWürfel() WürfelErgebnis {
 	return WürfelErgebnis(rand.Intn(6))
 }
 
-type Frucht int
+type Früchte int
 type Rabenteile int
 
 type Obstgarten struct {
-	Pflaumen, Birnen, Kirschen, Äpfel Frucht
+	Pflaumen, Birnen, Kirschen, Äpfel Früchte
 	Rabenteile
-}
-
-func BeginneObstgarten() Obstgarten {
-	return Obstgarten{
-		Pflaumen: 10,
-		Birnen:   10,
-		Kirschen: 10,
-		Äpfel:    10,
-	}
 }
 
 func (o Obstgarten) Ergebnis() (gewonnen, verloren bool) {
@@ -45,7 +38,69 @@ func (o Obstgarten) Ergebnis() (gewonnen, verloren bool) {
 	return
 }
 
-func (frucht *Frucht) Nehme() bool {
+func SpieleObstgarten(spieler []Spieler) (gewonnen bool) {
+	obstgarten := Obstgarten{
+		Pflaumen: 10,
+		Birnen:   10,
+		Kirschen: 10,
+		Äpfel:    10,
+	}
+	for _, aktuellerSpieler := range RotiereUnendlich(spieler) {
+		switch WerfeWürfel() {
+		case Pflaume:
+			obstgarten.Pflaumen.Nehme()
+		case Birne:
+			obstgarten.Birnen.Nehme()
+		case Kirsche:
+			obstgarten.Kirschen.Nehme()
+		case Apfel:
+			obstgarten.Äpfel.Nehme()
+		case Obstkorb:
+			aktuellerSpieler.MachObstkorbZug(&obstgarten)
+		case Rabe:
+			obstgarten.Rabenteile.EinsDazu()
+		}
+
+		if gewonnen, verloren := obstgarten.Ergebnis(); gewonnen {
+			return true
+		} else if verloren {
+			return false
+		}
+	}
+	panic("should never be reached")
+}
+
+func main() {
+	const anzahlSpiele = 500000
+	fmt.Printf("Anzahl Spiele: %d, Sigma = %.2f%%\n", anzahlSpiele, 100.0/math.Sqrt(float64(anzahlSpiele)))
+	var wg sync.WaitGroup
+	for _, spieler := range [][]Spieler{
+		{Optimierer{GuteStrategie}},
+		{Optimierer{SchlechteStrategie}},
+		{Optimierer{GuteStrategie}, Optimierer{GuteStrategie}},
+		{Optimierer{GuteStrategie}, Optimierer{SchlechteStrategie}},
+		{Optimierer{GuteStrategie}, Kirschenliebhaber{}},
+		{Kirschenliebhaber{}, Kirschenliebhaber{}},
+		{Kirschenliebhaber{}},
+		{Kirschenliebhaber{}, Optimierer{SchlechteStrategie}},
+		{Kirschenliebhaber{}, Kirschenliebhaber{}, Optimierer{GuteStrategie}},
+	} {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			anzahlGewonnen := 0
+			for spiel := 0; spiel < anzahlSpiele; spiel++ {
+				if gewonnen := SpieleObstgarten(spieler); gewonnen {
+					anzahlGewonnen++
+				}
+			}
+			fmt.Printf("Gewinnwskt %.2f%% mit %s\n", float64(100*anzahlGewonnen)/float64(anzahlSpiele), spieler)
+		}()
+	}
+	wg.Wait()
+}
+
+func (frucht *Früchte) Nehme() bool {
 	if *frucht > 0 {
 		*frucht--
 		return true
@@ -59,72 +114,62 @@ func (r *Rabenteile) EinsDazu() {
 }
 
 type Spieler interface {
-	MachZug(obstgarten *Obstgarten)
-}
-
-type Optimierer struct {
-}
-
-func (s Optimierer) MachZug(obstgarten *Obstgarten) {
-	switch WerfeWürfel() {
-	case Pflaume:
-		obstgarten.Pflaumen.Nehme()
-	case Birne:
-		obstgarten.Birnen.Nehme()
-	case Kirsche:
-		obstgarten.Kirschen.Nehme()
-	case Apfel:
-		obstgarten.Äpfel.Nehme()
-	case Obstkorb:
-		type Paar struct {
-			*Frucht
-			Anzahl int
-		}
-		paare := []Paar{
-			{&obstgarten.Pflaumen, int(obstgarten.Pflaumen)},
-			{&obstgarten.Birnen, int(obstgarten.Birnen)},
-			{&obstgarten.Kirschen, int(obstgarten.Kirschen)},
-			{&obstgarten.Äpfel, int(obstgarten.Äpfel)},
-			{&obstgarten.Pflaumen, int(obstgarten.Pflaumen) - 1},
-			{&obstgarten.Birnen, int(obstgarten.Birnen) - 1},
-			{&obstgarten.Kirschen, int(obstgarten.Kirschen) - 1},
-			{&obstgarten.Äpfel, int(obstgarten.Äpfel) - 1},
-		}
-		Durcheinander(paare)
-		slices.SortStableFunc(paare, func(a, b Paar) int {
-			return b.Anzahl - a.Anzahl
-		})
-		MachObstkorbZug(paare, func(paar Paar) bool {
-			return paar.Frucht.Nehme()
-		})
-	case Rabe:
-		obstgarten.Rabenteile.EinsDazu()
-	}
+	MachObstkorbZug(obstgarten *Obstgarten)
 }
 
 type Kirschenliebhaber struct {
 }
 
-func (s Kirschenliebhaber) MachZug(obstgarten *Obstgarten) {
-	switch WerfeWürfel() {
-	case Pflaume:
-		obstgarten.Pflaumen.Nehme()
-	case Birne:
-		obstgarten.Birnen.Nehme()
-	case Kirsche:
-		obstgarten.Kirschen.Nehme()
-	case Apfel:
-		obstgarten.Äpfel.Nehme()
-	case Obstkorb:
-		allesAußerKirschen := Verdopple(Früchte{&obstgarten.Pflaumen, &obstgarten.Äpfel, &obstgarten.Birnen})
-		Durcheinander(allesAußerKirschen)
-		MachObstkorbZug(append(Verdopple(Früchte{&obstgarten.Kirschen}), allesAußerKirschen...), (*Frucht).Nehme)
-	case Rabe:
-		obstgarten.Rabenteile.EinsDazu()
-	}
+func (s Kirschenliebhaber) MachObstkorbZug(obstgarten *Obstgarten) {
+	allesAußerKirschen := Verdopple([]*Früchte{&obstgarten.Pflaumen, &obstgarten.Äpfel, &obstgarten.Birnen})
+	Durcheinander(allesAußerKirschen)
+	MachObstkorbZug(append(Verdopple([]*Früchte{&obstgarten.Kirschen}), allesAußerKirschen...), (*Früchte).Nehme)
 }
 
-type Früchte []*Frucht
+var (
+	GuteStrategie      = Strategie{"VieleZuerst", (*FrüchteMitAnzahl).VieleZuerst}
+	SchlechteStrategie = Strategie{"WenigeZuerst", (*FrüchteMitAnzahl).WenigeZuerst}
+)
+
+type Strategie struct {
+	Name              string
+	FrüchteSortierung func(a, b *FrüchteMitAnzahl) int
+}
+
+type Optimierer struct {
+	Strategie Strategie
+}
+
+type FrüchteMitAnzahl struct {
+	*Früchte
+	Anzahl int
+}
+
+func (a *FrüchteMitAnzahl) VieleZuerst(b *FrüchteMitAnzahl) int {
+	return b.Anzahl - a.Anzahl
+}
+
+func (a *FrüchteMitAnzahl) WenigeZuerst(b *FrüchteMitAnzahl) int {
+	return a.Anzahl - b.Anzahl
+}
+
+func (s Optimierer) MachObstkorbZug(obstgarten *Obstgarten) {
+	var früchteMitAnzahl []*FrüchteMitAnzahl
+	fügeHinzu := func(frucht *Früchte, delta int) {
+		früchteMitAnzahl = append(früchteMitAnzahl, &FrüchteMitAnzahl{frucht, int(*frucht) + delta})
+	}
+	fügeHinzu(&obstgarten.Pflaumen, 0)
+	fügeHinzu(&obstgarten.Birnen, 0)
+	fügeHinzu(&obstgarten.Kirschen, 0)
+	fügeHinzu(&obstgarten.Äpfel, 0)
+	fügeHinzu(&obstgarten.Pflaumen, -1)
+	fügeHinzu(&obstgarten.Birnen, -1)
+	fügeHinzu(&obstgarten.Kirschen, -1)
+	fügeHinzu(&obstgarten.Äpfel, -1)
+	Durcheinander(früchteMitAnzahl)
+	slices.SortStableFunc(früchteMitAnzahl, s.Strategie.FrüchteSortierung)
+	MachObstkorbZug(früchteMitAnzahl, (*FrüchteMitAnzahl).Nehme)
+}
 
 func MachObstkorbZug[T any](früchte []T, nimm func(T) bool) {
 	genommen := 0
@@ -135,27 +180,6 @@ func MachObstkorbZug[T any](früchte []T, nimm func(T) bool) {
 			genommen++
 		}
 	}
-}
-
-func main() {
-	anzahlSpiele := 100000
-	anzahlGewonnen := 0
-	for spiel := 0; spiel < anzahlSpiele; spiel++ {
-		obstgarten := BeginneObstgarten()
-		spieler := []Spieler{Optimierer{}, Optimierer{}}
-		for _, aktuellerSpieler := range RotiereUnendlich(spieler) {
-			aktuellerSpieler.MachZug(&obstgarten)
-			if gewonnen, verloren := obstgarten.Ergebnis(); gewonnen {
-				anzahlGewonnen++
-				break
-			} else if verloren {
-				break
-			}
-		}
-	}
-
-	log.Printf("Gewinnwahrscheinlichkeit: %.2f", float64(100*anzahlGewonnen)/float64(anzahlSpiele))
-
 }
 
 func RotiereUnendlich[T any](s []T) iter.Seq2[int, T] {
@@ -201,7 +225,7 @@ func (w WürfelErgebnis) String() string {
 }
 
 func (s Optimierer) String() string {
-	return "Optimierer"
+	return fmt.Sprintf("Optimierer(%s)", s.Strategie.Name)
 }
 
 func (s Kirschenliebhaber) String() string {
